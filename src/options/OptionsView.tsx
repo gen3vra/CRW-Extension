@@ -12,10 +12,10 @@ const PAGE_CSS = {
 };
 
 const REFRESH_INTERVAL_OPTIONS = [
-  { value: 60 * 60 * 1000, label: "1 hour" },
-  { value: 12 * 60 * 60 * 1000, label: "12 hours" },
-  { value: 24 * 60 * 60 * 1000, label: "24 hours" },
-  { value: 7 * 24 * 60 * 60 * 1000, label: "1 week" },
+  {value: 60 * 60 * 1000, label: "1 hour"},
+  {value: 12 * 60 * 60 * 1000, label: "12 hours"},
+  {value: 24 * 60 * 60 * 1000, label: "24 hours"},
+  {value: 7 * 24 * 60 * 60 * 1000, label: "1 week"},
 ] as const;
 
 export type OptionsViewProps = {
@@ -110,7 +110,7 @@ export const OptionsView = (props: OptionsViewProps) => {
               flexShrink: 0,
             }}
           />
-          <div style={{ minWidth: 0 }}>
+          <div style={{minWidth: 0}}>
             <h1
               style={{
                 margin: 0,
@@ -120,9 +120,9 @@ export const OptionsView = (props: OptionsViewProps) => {
                 color: PAGE_CSS.text,
               }}
             >
-              Consumer Rights Wiki Options
+              Options 🌹
             </h1>
-            <div style={{ fontSize: "12px", color: PAGE_CSS.muted }}>
+            <div style={{fontSize: "12px", color: PAGE_CSS.muted}}>
               Popup preferences and ignored sites
             </div>
           </div>
@@ -178,7 +178,7 @@ export const OptionsView = (props: OptionsViewProps) => {
               onChange={(event) => {
                 onToggleWarnings(event.target.checked);
               }}
-              style={{ width: "16px", height: "16px", accentColor: "#FFFFFF" }}
+              style={{width: "16px", height: "16px", accentColor: "#FFFFFF"}}
             />
           </label>
 
@@ -240,7 +240,7 @@ export const OptionsView = (props: OptionsViewProps) => {
 
           {suppressedPageNames.length > 0 && (
             <div
-              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+              style={{display: "flex", flexDirection: "column", gap: "8px"}}
             >
               {suppressedPageNames.map((pageName) => (
                 <div
@@ -337,7 +337,7 @@ export const OptionsView = (props: OptionsViewProps) => {
 
           {suppressedDomains.length > 0 && (
             <div
-              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+              style={{display: "flex", flexDirection: "column", gap: "8px"}}
             >
               {suppressedDomains.map((domain) => (
                 <div
@@ -462,7 +462,7 @@ export const OptionsView = (props: OptionsViewProps) => {
               </select>
             </label>
 
-            <div style={{ fontSize: "12px", color: PAGE_CSS.muted }}>
+            <div style={{fontSize: "12px", color: PAGE_CSS.muted}}>
               Last refreshed: {formatLastRefreshed(lastRefreshedAt)}
             </div>
 
@@ -510,14 +510,14 @@ export const OptionsView = (props: OptionsViewProps) => {
               </button>
 
               {refreshError && (
-                <span style={{ fontSize: "12px", color: "#FFE2E2" }}>
+                <span style={{fontSize: "12px", color: "#FFE2E2"}}>
                   {refreshError}
                 </span>
               )}
             </div>
 
             {lastRefreshError && (
-              <div style={{ fontSize: "12px", color: "#FFE2E2" }}>
+              <div style={{fontSize: "12px", color: "#FFE2E2"}}>
                 Last fetch error: {lastRefreshError}
               </div>
             )}

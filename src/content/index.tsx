@@ -1,13 +1,13 @@
 import React from "react";
-import { createRoot, type Root } from "react-dom/client";
+import {createRoot, type Root} from "react-dom/client";
 import browser from "webextension-polyfill";
 
 import * as Constants from "@/shared/constants";
-import { CargoEntry, PageContext } from "@/shared/types";
+import {CargoEntry, PageContext} from "@/shared/types";
 import * as Messaging from "@/messaging";
-import { MessageType } from "@/messaging/type";
-import { InlinePopup } from "@/content/InlinePopup";
-import { InlineEmptyState } from "@/content/InlineEmptyState";
+import {MessageType} from "@/messaging/type";
+import {InlinePopup} from "@/content/InlinePopup";
+import {InlineEmptyState} from "@/content/InlineEmptyState";
 import {
   getInlinePopupInstruction,
   type InlinePopupInstruction,
@@ -34,6 +34,54 @@ let popupHost: HTMLDivElement | null = null;
 let popupShadowMount: HTMLDivElement | null = null;
 let popupRoot: Root | null = null;
 let forcePopupVisible = false;
+const CLOSE_TIMEOUT_MS = 5000;
+let closeTimer: number | null = null;
+let componentCloseHandler: (() => void) | null = null;
+
+function clearCloseTimer() {
+  if (closeTimer !== null) {
+    console.log(
+      `${Constants.LOG_PREFIX} Clearing close timer (id=` + String(closeTimer) + `)`,
+    );
+    clearTimeout(closeTimer);
+    closeTimer = null;
+  }
+}
+
+function startCloseTimer() {
+  clearCloseTimer();
+  console.log(
+    `${Constants.LOG_PREFIX} Starting close timer for ${CLOSE_TIMEOUT_MS}ms`,
+  );
+  closeTimer = window.setTimeout(() => {
+    console.log(`${Constants.LOG_PREFIX} Close timer fired`);
+    if (componentCloseHandler) {
+      try {
+        console.log(`${Constants.LOG_PREFIX} Invoking component close handler`);
+        componentCloseHandler();
+        return;
+      } catch (err) {
+        console.error(
+          `${Constants.LOG_PREFIX} Error calling component close handler, falling back to removeInlinePopup`,
+          err,
+        );
+      }
+    }
+
+    console.log(`${Constants.LOG_PREFIX} Falling back to removeInlinePopup`);
+    removeInlinePopup();
+  }, CLOSE_TIMEOUT_MS);
+}
+
+const handlePopupMouseOver = () => {
+  console.log(`${Constants.LOG_PREFIX} Popup mouseover - pausing auto-close`);
+  clearCloseTimer();
+};
+
+const handlePopupMouseOut = () => {
+  console.log(`${Constants.LOG_PREFIX} Popup mouseout - resuming auto-close`);
+  startCloseTimer();
+};
 
 const normalizeHostname = (hostname: string): string => {
   return hostname
@@ -168,6 +216,7 @@ const unsuppressCurrentSite = async (): Promise<void> => {
 
 const ensurePopupRoot = (): Root => {
   if (popupRoot && popupHost?.isConnected && popupShadowMount?.isConnected) {
+    console.log(`${Constants.LOG_PREFIX} Reusing existing popup root`);
     return popupRoot;
   }
 
@@ -180,7 +229,7 @@ const ensurePopupRoot = (): Root => {
   popupHost.style.position = "static";
   popupHost.style.display = "block";
 
-  const shadowRoot = popupHost.attachShadow({ mode: "open" });
+  const shadowRoot = popupHost.attachShadow({mode: "open"});
   const resetStyle = document.createElement("style");
   resetStyle.textContent = `
     :host {
@@ -194,24 +243,42 @@ const ensurePopupRoot = (): Root => {
 
   popupShadowMount = document.createElement("div");
   popupShadowMount.style.all = "initial";
+  popupShadowMount.addEventListener("mouseover", handlePopupMouseOver);
+  popupShadowMount.addEventListener("mouseout", handlePopupMouseOut);
   shadowRoot.appendChild(popupShadowMount);
+  console.log(`${Constants.LOG_PREFIX} Created popup host and attached shadow mount`);
 
   document.documentElement.appendChild(popupHost);
   popupRoot = createRoot(popupShadowMount);
+  console.log(`${Constants.LOG_PREFIX} Popup root created and mounted`);
   return popupRoot;
 };
 
 const removeInlinePopup = () => {
+  console.log(`${Constants.LOG_PREFIX} removeInlinePopup called`);
   forcePopupVisible = false;
   if (popupRoot) {
-    popupRoot.unmount();
+    try {
+      popupRoot.unmount();
+      console.log(`${Constants.LOG_PREFIX} Unmounted popup root`);
+    } catch (err) {
+      console.error(`${Constants.LOG_PREFIX} Error unmounting popup root`, err);
+    }
   }
   popupRoot = null;
+  clearCloseTimer();
+  if (popupShadowMount) {
+    popupShadowMount.removeEventListener("mouseover", handlePopupMouseOver);
+    popupShadowMount.removeEventListener("mouseout", handlePopupMouseOut);
+    console.log(`${Constants.LOG_PREFIX} Removed popup mouse listeners`);
+  }
   popupShadowMount = null;
   if (popupHost?.isConnected) {
     popupHost.remove();
+    console.log(`${Constants.LOG_PREFIX} Removed popup host from DOM`);
   }
   popupHost = null;
+  componentCloseHandler = null;
 };
 
 const renderInlinePopup = async (
@@ -222,37 +289,49 @@ const renderInlinePopup = async (
   const suppressedPageNameSet = new Set(
     suppressedPageNames.map((name) => normalizePageName(name)),
   );
+  console.log(
+    `${Constants.LOG_PREFIX} renderInlinePopup called: matches=${matches.length}, ignorePreferences=${ignorePreferences}, suppressedPageNames=${JSON.stringify(
+      suppressedPageNames,
+    )}`,
+  );
   const filteredMatches =
     suppressedPageNameSet.size === 0
       ? matches
       : matches.filter((match) => {
-          const normalizedPageName = normalizePageName(
-            String(match.PageName || ""),
+        const normalizedPageName = normalizePageName(
+          String(match.PageName || ""),
+        );
+        if (suppressedPageNameSet.has(normalizedPageName)) return false;
+
+        if (
+          match._type === "Product" ||
+          match._type === "ProductLine" ||
+          match._type === "Incident"
+        ) {
+          const normalizedCompany = normalizePageName(
+            String(match.Company || ""),
           );
-          if (suppressedPageNameSet.has(normalizedPageName)) return false;
-
           if (
-            match._type === "Product" ||
-            match._type === "ProductLine" ||
-            match._type === "Incident"
+            normalizedCompany &&
+            suppressedPageNameSet.has(normalizedCompany)
           ) {
-            const normalizedCompany = normalizePageName(
-              String(match.Company || ""),
-            );
-            if (
-              normalizedCompany &&
-              suppressedPageNameSet.has(normalizedCompany)
-            ) {
-              return false;
-            }
+            return false;
           }
+        }
 
-          return true;
-        });
+        return true;
+      });
 
   const visibleMatches = ignorePreferences ? matches : filteredMatches;
 
+  console.log(
+    `${Constants.LOG_PREFIX} visibleMatches length=${visibleMatches.length}`,
+  );
+
   if (visibleMatches.length === 0 && !ignorePreferences) {
+    console.log(
+      `${Constants.LOG_PREFIX} No visible matches and respecting preferences - removing popup`,
+    );
     removeInlinePopup();
     return;
   }
@@ -260,28 +339,40 @@ const renderInlinePopup = async (
   const currentlyWarningsEnabled = await isWarningsEnabled();
 
   if (!ignorePreferences && !currentlyWarningsEnabled) {
+    console.log(
+      `${Constants.LOG_PREFIX} Warnings are disabled by user preferences - removing popup`,
+    );
     removeInlinePopup();
     return;
   }
 
   const currentlySuppressed = await isCurrentSiteSuppressed();
   if (!ignorePreferences && currentlySuppressed) {
+    console.log(
+      `${Constants.LOG_PREFIX} Current site is suppressed - removing popup`,
+    );
     removeInlinePopup();
     return;
   }
   forcePopupVisible = ignorePreferences;
   const root = ensurePopupRoot();
   if (visibleMatches.length === 0) {
+    const onCloseEmpty = () => {
+      console.log(`${Constants.LOG_PREFIX} InlineEmptyState onClose invoked`);
+      removeInlinePopup();
+    };
+    componentCloseHandler = onCloseEmpty;
     root.render(
       <InlineEmptyState
         logoUrl={ASSET_URLS.logo}
         settingsIconUrl={ASSET_URLS.settings}
         onOpenSettings={openOptions}
-        onClose={removeInlinePopup}
+        onClose={onCloseEmpty}
       />,
     );
     return;
   }
+
 
   const handleDisableWarnings = async () => {
     if (ignorePreferences && !currentlyWarningsEnabled) {
@@ -300,6 +391,9 @@ const renderInlinePopup = async (
   const topVisibleCompanyName = String(topVisibleMatch?.Company || "").trim();
   const topVisibleCompanyNormalized = normalizePageName(topVisibleCompanyName);
   const topVisibleScopeType = topVisibleMatch?._type;
+  console.log(
+    `${Constants.LOG_PREFIX} Rendering InlinePopup: topMatch=${topVisiblePageName} company=${topVisibleCompanyName} type=${topVisibleScopeType}`,
+  );
   const topVisibleTypeUsesCompanyToggle =
     topVisibleScopeType === "Product" ||
     topVisibleScopeType === "ProductLine" ||
@@ -364,6 +458,12 @@ const renderInlinePopup = async (
     removeInlinePopup();
   };
 
+  const onCloseHandler = () => {
+    console.log(`${Constants.LOG_PREFIX} InlinePopup onClose invoked`);
+    removeInlinePopup();
+  };
+  componentCloseHandler = onCloseHandler;
+
   root.render(
     <InlinePopup
       matches={visibleMatches}
@@ -371,7 +471,7 @@ const renderInlinePopup = async (
       externalIconUrl={ASSET_URLS.external}
       settingsIconUrl={ASSET_URLS.settings}
       closeIconUrl={ASSET_URLS.close}
-      onClose={removeInlinePopup}
+      onClose={onCloseHandler}
       onOpenSettings={openOptions}
       onDisableWarnings={() => void handleDisableWarnings()}
       disableWarningsLabel={
@@ -389,10 +489,13 @@ const renderInlinePopup = async (
       onSuppressSite={() => void handleSuppressSiteClick()}
     />,
   );
+  startCloseTimer();
 };
 
 const runContentScript = async () => {
+  console.log(`${Constants.LOG_PREFIX} runContentScript starting for ${location.href}`);
   if (!(await isWarningsEnabled()) || (await isCurrentSiteSuppressed())) {
+    console.log(`${Constants.LOG_PREFIX} Not showing popup due to prefs or suppression`);
     removeInlinePopup();
   }
 
@@ -417,9 +520,9 @@ const runContentScript = async () => {
   const marketplaceProperties =
     amazonMarketplaceProperties || ebayJsonLdMarketplaceProperties
       ? {
-          ...(amazonMarketplaceProperties || {}),
-          ...(ebayJsonLdMarketplaceProperties || {}),
-        }
+        ...(amazonMarketplaceProperties || {}),
+        ...(ebayJsonLdMarketplaceProperties || {}),
+      }
       : undefined;
 
   const context: PageContext = {
@@ -434,7 +537,7 @@ const runContentScript = async () => {
     },
     marketplaceProperties,
   };
-
+  console.log(`${Constants.LOG_PREFIX} Sending PAGE_CONTEXT_UPDATE`, context);
   browser.runtime.sendMessage(
     Messaging.createMessage(
       MessageType.PAGE_CONTEXT_UPDATE,
@@ -447,8 +550,16 @@ const runContentScript = async () => {
 const handleInlinePopupInstruction = async (
   instruction: InlinePopupInstruction,
 ) => {
+  console.log(
+    `${Constants.LOG_PREFIX} Received inline popup instruction: ignorePreferences=${instruction.ignorePreferences} matches=${instruction.matches.length}`,
+    instruction,
+  );
+
   if (!instruction.ignorePreferences) {
-    if (forcePopupVisible && !(await isWarningsEnabled())) return;
+    if (forcePopupVisible && !(await isWarningsEnabled())) {
+      console.log(`${Constants.LOG_PREFIX} forcePopupVisible set but warnings disabled - skipping render`);
+      return;
+    }
     void renderInlinePopup(instruction.matches, false);
     return;
   }
