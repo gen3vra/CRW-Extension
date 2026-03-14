@@ -34,25 +34,36 @@ let popupHost: HTMLDivElement | null = null;
 let popupShadowMount: HTMLDivElement | null = null;
 let popupRoot: Root | null = null;
 let forcePopupVisible = false;
-const CLOSE_TIMEOUT_MS = 5000;
+const CLOSE_TIMEOUT_MS = 8000;
 let closeTimer: number | null = null;
+const FADE_START_MS = 4000;
+let fadeTimer: number | null = null;
 let componentCloseHandler: (() => void) | null = null;
 
 function clearCloseTimer() {
   if (closeTimer !== null) {
-    console.log(
-      `${Constants.LOG_PREFIX} Clearing close timer (id=` + String(closeTimer) + `)`,
-    );
     clearTimeout(closeTimer);
     closeTimer = null;
+  }
+  if (fadeTimer !== null) {
+    clearTimeout(fadeTimer);
+    fadeTimer = null;
   }
 }
 
 function startCloseTimer() {
   clearCloseTimer();
-  console.log(
-    `${Constants.LOG_PREFIX} Starting close timer for ${CLOSE_TIMEOUT_MS}ms`,
-  );
+
+  fadeTimer = window.setTimeout(() => {
+    try {
+      if (popupShadowMount) {
+        popupShadowMount.style.transition = `opacity 3s ease-out`;
+        popupShadowMount.style.opacity = "0";
+      }
+    } catch (err) {
+      console.error(`${Constants.LOG_PREFIX} Error setting opacity on fade start`, err);
+    }
+  }, FADE_START_MS);
   closeTimer = window.setTimeout(() => {
     console.log(`${Constants.LOG_PREFIX} Close timer fired`);
     if (componentCloseHandler) {
@@ -74,12 +85,19 @@ function startCloseTimer() {
 }
 
 const handlePopupMouseOver = () => {
-  console.log(`${Constants.LOG_PREFIX} Popup mouseover - pausing auto-close`);
   clearCloseTimer();
+  try {
+    if (popupShadowMount) {
+      // immediately restore visibility while user interacts
+      popupShadowMount.style.transition = "";
+      popupShadowMount.style.opacity = "1";
+    }
+  } catch (err) {
+    console.error(`${Constants.LOG_PREFIX} Error resetting opacity on mouseover`, err);
+  }
 };
 
 const handlePopupMouseOut = () => {
-  console.log(`${Constants.LOG_PREFIX} Popup mouseout - resuming auto-close`);
   startCloseTimer();
 };
 
@@ -217,6 +235,15 @@ const unsuppressCurrentSite = async (): Promise<void> => {
 const ensurePopupRoot = (): Root => {
   if (popupRoot && popupHost?.isConnected && popupShadowMount?.isConnected) {
     console.log(`${Constants.LOG_PREFIX} Reusing existing popup root`);
+    try {
+      if (popupShadowMount) {
+        popupShadowMount.style.transition = `opacity 3s ease-out`;
+        popupShadowMount.style.opacity = "1";
+      }
+    } catch (err) {
+      console.error(`${Constants.LOG_PREFIX} Error resetting popup styles when reusing root`, err);
+    }
+    clearCloseTimer();
     return popupRoot;
   }
 
@@ -226,8 +253,12 @@ const ensurePopupRoot = (): Root => {
   popupHost = document.createElement("div");
   popupHost.id = POPUP_ID;
   popupHost.style.all = "initial";
-  popupHost.style.position = "static";
+  // ensure popup stays on top of other content
+  popupHost.style.position = "fixed";
+  popupHost.style.right = "0";
+  popupHost.style.bottom = "0";
   popupHost.style.display = "block";
+  popupHost.style.zIndex = String(2147483647);
 
   const shadowRoot = popupHost.attachShadow({mode: "open"});
   const resetStyle = document.createElement("style");
@@ -243,6 +274,9 @@ const ensurePopupRoot = (): Root => {
 
   popupShadowMount = document.createElement("div");
   popupShadowMount.style.all = "initial";
+  // permanent transition so changing opacity later animates
+  popupShadowMount.style.transition = `opacity 3s ease-out`;
+  popupShadowMount.style.opacity = "1";
   popupShadowMount.addEventListener("mouseover", handlePopupMouseOver);
   popupShadowMount.addEventListener("mouseout", handlePopupMouseOut);
   shadowRoot.appendChild(popupShadowMount);
